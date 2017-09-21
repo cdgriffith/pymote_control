@@ -19,18 +19,20 @@ if not config:
     config = ConfigBox({'Pymote': {
         "io_dir": "io",
         "data_file": "data.json",
-        "log_level": 20,
+        "log_level": 10,
         "cleanup_on_start": True
     }})
 
 
 log = reusables.setup_logger("pymote", level=config.Pymote.int('log_level'))
-log.info(open(f"{os.path.dirname(os.path.realpath(__file__))}{os.sep}"
-               f"ascii_logo.txt").read())
+
 app = Sanic("pymote")
 # Remove the stupid logo
 sanic_log = logging.getLogger('sanic')
 sanic_log.setLevel(logging.INFO)
+log.info("Starting Pymote Control Center")
+log.debug(open(f"{os.path.dirname(os.path.realpath(__file__))}{os.sep}"
+               f"ascii_logo.txt").read())
 
 os.makedirs(config.Pymote.io_dir, exist_ok=True)
 try:
