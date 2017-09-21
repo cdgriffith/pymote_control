@@ -18,7 +18,8 @@ if not config:
     config = ConfigBox({'Pymote': {
         "io_dir": "io",
         "data_file": "data.json",
-        "log_level": 10
+        "log_level": 10,
+        "cleanup_on_start": True
     }})
 
 
@@ -42,6 +43,8 @@ def cleanup_process(pid):
 
 
 def still_running(pid):
+    if data[pid].finished:
+        return False
     if pid in processes:
         if processes[pid].poll() is not None:
             cleanup_process(pid)
@@ -54,6 +57,24 @@ def still_running(pid):
         return False
     return True
 
+
+def cleanup_on_start():
+    log.info("Cleaning up old data")
+    delete = []
+    for pid, info in data.items():
+        if not still_running(pid):
+            try:
+                os.unlink(f"{info.base}_stdout")
+                os.unlink(f"{info.base}_stderr")
+                os.unlink(f"{info.base}_stdin")
+            except OSError:
+                log.exception(f"Could not clean up all {pid} files")
+            delete.append(pid)
+    for x in delete:
+        del data[x]
+    data.to_json(filename=config.Pymote.data_file)
+
+
 async def start_program(command, **kwargs):
     file_base = f"{config.Pymote.io_dir}{os.sep}{datetime.utcnow().isoformat()}"
     reusables.touch(f"{file_base}_stdin")
@@ -61,6 +82,7 @@ async def start_program(command, **kwargs):
               stdout=open(f"{file_base}_stdout", "w"),
               stderr=open(f"{file_base}_stderr", "w"),
               stdin=open(f"{file_base}_stdin"),
+              preexec_fn=os.setpgrp,
               **kwargs)
     data[str(p.pid)] = {"base": file_base,
                         "finished": False,
@@ -150,5 +172,9 @@ async def stop_and_delete_logs(request, pid):
 
 
 if __name__ == '__main__':
-    app.run()
-
+    if config.Pymote.bool('cleanup_on_start'):
+        cleanup_on_start()
+    try:
+        app.run()
+    finally:
+        os._exit(0)

@@ -2,3 +2,4 @@
 io_dir=io
 data_file=data.json
 log_level=10
+cleanup_on_start=True
