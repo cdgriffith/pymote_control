@@ -1,0 +1,4 @@
+[Pymote]
+io_dir=io
+data_file=data.json
+log_level=10
