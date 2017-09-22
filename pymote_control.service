@@ -1,0 +1,13 @@
+[Unit]
+Description=Pymote Control
+
+[Service]
+Restart=always
+WorkingDirectory={install_dir}/
+ExecStart={install_dir}/.pymote_venv/bin/python3 pymote_control.py
+KillSignal=SIGINT
+SuccessExitStatus=SIGINT
+User=pymote
+
+[Install]
+WantedBy=multi-user.target

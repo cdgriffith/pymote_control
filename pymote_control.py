@@ -3,6 +3,7 @@ import sys
 from subprocess import Popen, run, PIPE
 from datetime import datetime
 import logging
+from configparser import ExtendedInterpolation
 
 import aiofiles
 import reusables
@@ -14,41 +15,42 @@ from box import Box, ConfigBox
 class PCError(Exception):
     """Pymote Control Error"""
 
-config = reusables.config_namespace("config.ini")
+config = reusables.config_namespace(["pymote.ini", "config.ini"],
+                                    interpolation=ExtendedInterpolation())
 if not config:
     config = ConfigBox({'Pymote': {
         "io_dir": "io",
         "data_file": "data.json",
         "log_level": 10,
-        "cleanup_on_start": True
+        "cleanup_on_start": True,
+        "auth_type": "headers",
+        "auth_tokens": "pass,password",
+        "port": 6666,
+        "host": "0.0.0.0",
+        "log_file": "pymote_control.log"
     }})
 
-
-log = reusables.setup_logger("pymote", level=config.Pymote.int('log_level'))
+log = reusables.setup_logger("pymote",
+                             level=config.Pymote.int('log_level'),
+                             file_path=os.path.expanduser(
+                                 config.Pymote.log_file))
 
 app = Sanic("pymote")
-# Remove the stupid logo
-sanic_log = logging.getLogger('sanic')
-sanic_log.setLevel(logging.INFO)
-log.info("Starting Pymote Control Center")
-log.debug(open(f"{os.path.dirname(os.path.realpath(__file__))}{os.sep}"
-               f"ascii_logo.txt").read())
 
 os.makedirs(config.Pymote.io_dir, exist_ok=True)
 try:
     data = Box.from_json(filename=config.Pymote.data_file)
 except FileNotFoundError:
     data = Box()
-
 processes = Box()
 
 
-def cleanup_process(pid):
-    data[pid].finished = True
-    try:
-        os.unlink(f"{data[pid].base}_stdin")
-    except OSError:
-        pass
+@app.middleware('request')
+async def check_auth(request):
+    if config.Pymote.auth_type == "headers":
+        token = request.headers.get('auth')
+        if token not in config.Pymote.list('auth_tokens'):
+            return json({'error': 'Not Authorized'}, status=403)
 
 
 def still_running(pid):
@@ -56,13 +58,13 @@ def still_running(pid):
         return False
     if pid in processes:
         if processes[pid].poll() is not None:
-            cleanup_process(pid)
+            data[pid].finished = True
             data[pid].return_code = processes[pid].poll()
             return False
     elif sys.platform.startswith("linux"):
         resp = run(f"kill -0 {pid}", shell=True, stdout=PIPE, stderr=PIPE)
         if b"No such process" in resp.stderr:
-            cleanup_process(pid)
+            data[pid].finished = True
         return False
     return True
 
@@ -140,10 +142,10 @@ async def stop_program(request, pid):
             if processes[pid].poll() is not None:
                 processes[pid].terminate()
                 data[pid].return_code = processes[pid].returncode
-                cleanup_process(pid)
+                data[pid].finished = True
         elif sys.platform.startswith("linux"):
             resp = run(f"kill -9 {pid}")
-            cleanup_process(pid)
+            data[pid].finished = True
             log.info(f"Manually killing {pid} resulted "
                      f"in message {resp.stdout} {resp.stderr}")
         data.to_json(filename=config.Pymote.data_file)
@@ -158,10 +160,10 @@ async def stop_and_delete_logs(request, pid):
         if pid in processes:
             if processes[pid].poll() is not None:
                 processes[pid].terminate()
-                cleanup_process(pid)
+                data[pid].finished = True
         elif sys.platform.startswith("linux"):
             resp = run(f"kill -9 {pid}")
-            cleanup_process(pid)
+            data[pid].finished = True
             log.info(f"Manually killing {pid} resulted "
                      f"in message {resp.stdout} {resp.stderr}")
     data.to_json(filename=config.Pymote.data_file)
@@ -181,9 +183,17 @@ async def stop_and_delete_logs(request, pid):
 
 
 if __name__ == '__main__':
+    # Remove the stupid logo
+    sanic_log = logging.getLogger('sanic')
+    sanic_log.setLevel(logging.INFO)
+
+    log.info("Starting Pymote Control Center")
+    log.debug(open(f"{os.path.dirname(os.path.realpath(__file__))}{os.sep}"
+                   f"ascii_logo.txt").read())
+
     if config.Pymote.bool('cleanup_on_start'):
         cleanup_on_start()
     try:
-        app.run()
+        app.run(host=config.Pymote.host, port=config.Pymote.int('port'))
     finally:
         os._exit(0)
